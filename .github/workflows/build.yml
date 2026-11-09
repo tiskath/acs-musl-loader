@@ -1,0 +1,39 @@
+
+name: Build ACS musl Loader
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ARM64 Loader
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --output type=local,dest=./output \
+            .
+
+      - name: Verify Loader
+        run: |
+          file output/ld-musl-aarch64-termux.so
+          strings output/ld-musl-aarch64-termux.so | grep -E 'com.tom.rv2ide/files/usr/etc/(resolv.conf|hosts)'
+
+      - name: Upload Loader
+        uses: actions/upload-artifact@v4
+        with:
+          name: acs-musl-loader
+          path: output/ld-musl-aarch64-termux.so
+          retention-days: 7
+          
