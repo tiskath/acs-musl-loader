@@ -9,68 +9,65 @@ RUN apk add --no-cache \
 
 WORKDIR /build
 
-# Download musl source
+# Download musl v1.2.5
 RUN git clone --depth 1 --branch v1.2.5 \
     https://github.com/ifduyue/musl.git .
 
-# Inspect and patch DNS paths for ACS
+# Patch the actual musl source files
 RUN python3 - <<'PY'
-import re
+from pathlib import Path
 
-p = "src/internal/dynlink.c"
+patches = {
+    "src/network/resolvconf.c": (
+        '"/etc/resolv.conf"',
+        '"/data/data/com.tom.rv2ide/files/usr/etc/resolv.conf"'
+    ),
+    "src/network/lookup_name.c": (
+        '"/etc/hosts"',
+        '"/data/data/com.tom.rv2ide/files/usr/etc/hosts"'
+    )
+}
 
-with open(p, "r") as f:
-    s = f.read()
+for filename, (old, new) in patches.items():
+    path = Path(filename)
+    source = path.read_text()
 
-print("===== DNS SOURCE BEFORE PATCH =====")
+    if old not in source:
+        raise SystemExit(
+            "ERROR: Original path not found in " + filename
+        )
 
-for i, line in enumerate(s.splitlines(), 1):
-    if any(x in line for x in ("resolv.conf", "/etc/hosts", "RESOLV_CONF", "HOSTS_PATH")):
-        print(f"{i}: {line}")
+    source = source.replace(old, new)
 
-# Replace standard musl paths
-s = s.replace(
-    '"/etc/resolv.conf"',
-    '"/data/data/com.tom.rv2ide/files/usr/etc/resolv.conf"'
-)
+    if new not in source:
+        raise SystemExit(
+            "ERROR: Patch verification failed: " + filename
+        )
 
-s = s.replace(
-    '"/etc/hosts"',
-    '"/data/data/com.tom.rv2ide/files/usr/etc/hosts"'
-)
+    path.write_text(source)
+    print("PATCH OK:", filename)
 
-with open(p, "w") as f:
-    f.write(s)
-
-print("===== DNS SOURCE AFTER PATCH =====")
-
-for i, line in enumerate(s.splitlines(), 1):
-    if any(x in line for x in ("resolv.conf", "/etc/hosts", "RESOLV_CONF", "HOSTS_PATH")):
-        print(f"{i}: {line}")
-
-if "/data/data/com.tom.rv2ide/files/usr/etc/resolv.conf" not in s:
-    raise SystemExit("ERROR: ACS resolv.conf path was not patched")
-
-if "/data/data/com.tom.rv2ide/files/usr/etc/hosts" not in s:
-    raise SystemExit("ERROR: ACS hosts path was not patched")
-
-print("ACS DNS PATCH VERIFIED")
+print("ALL ACS PATHS PATCHED")
 PY
 
-# Build musl
+# Verify patched source
+RUN grep -n 'com.tom.rv2ide' \
+    src/network/resolvconf.c \
+    src/network/lookup_name.c
+
+# Build musl for ARM64
 RUN ./configure \
     --prefix=/out \
-    --target=aarch64-linux-musl \
     --disable-shared \
     && make -j2 \
     && make install
 
-# Prepare output
+# Prepare loader
 RUN mkdir -p /result \
     && cp /out/lib/ld-musl-aarch64.so.1 \
        /result/ld-musl-aarch64-termux.so \
     && chmod 755 /result/ld-musl-aarch64-termux.so
 
-# Final artifact image
+# Export artifact
 FROM scratch
 COPY --from=0 /result/ld-musl-aarch64-termux.so /
