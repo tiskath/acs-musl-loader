@@ -63,11 +63,25 @@ RUN ./configure \
     && make -j2 \
     && make install
 
-# Prepare loader
-RUN mkdir -p /result \
-    && cp /out/lib/ld-musl-aarch64.so.1 \
-       /result/ld-musl-aarch64-termux.so \
-    && chmod 755 /result/ld-musl-aarch64-termux.so
+
+# Locate and prepare musl loader
+RUN set -eux; \
+    echo "===== SEARCH LOADER IN /out ====="; \
+    find /out -name 'ld-musl*' -print; \
+    echo "===== SEARCH LOADER IN BUILD ====="; \
+    find /build -name 'ld-musl*' -print; \
+    LOADER="$(find /out -name 'ld-musl-aarch64.so.1' -print -quit)"; \
+    if [ -z "$LOADER" ]; then \
+        echo "ERROR: musl loader not found in /out"; \
+        echo "===== INSTALLED FILES ====="; \
+        find /out -maxdepth 4 -type f -print; \
+        exit 1; \
+    fi; \
+    mkdir -p /result; \
+    cp -L "$LOADER" /result/ld-musl-aarch64-termux.so; \
+    chmod 755 /result/ld-musl-aarch64-termux.so; \
+    file /result/ld-musl-aarch64-termux.so
+
 
 # Export artifact
 FROM scratch
