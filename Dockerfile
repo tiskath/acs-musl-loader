@@ -1,19 +1,21 @@
 
 FROM --platform=linux/arm64 alpine:3.21
 
+# Install build tools
 RUN apk add --no-cache \
     build-base \
     linux-headers \
     git \
-    python3
+    python3 \
+    file
 
 WORKDIR /build
 
-# Download musl v1.2.5
+# Download musl 1.2.5
 RUN git clone --depth 1 --branch v1.2.5 \
     https://github.com/ifduyue/musl.git .
 
-# Patch the actual musl source files
+# Patch DNS and hosts paths for ACS
 RUN python3 - <<'PY'
 from pathlib import Path
 
@@ -33,55 +35,50 @@ for filename, (old, new) in patches.items():
     source = path.read_text()
 
     if old not in source:
-        raise SystemExit(
-            "ERROR: Original path not found in " + filename
-        )
+        raise SystemExit("ERROR: Original path missing: " + filename)
 
     source = source.replace(old, new)
-
-    if new not in source:
-        raise SystemExit(
-            "ERROR: Patch verification failed: " + filename
-        )
-
     path.write_text(source)
+
+    if new not in path.read_text():
+        raise SystemExit("ERROR: Patch failed: " + filename)
+
     print("PATCH OK:", filename)
 
 print("ALL ACS PATHS PATCHED")
 PY
 
-# Verify patched source
+# Verify source paths
 RUN grep -n 'com.tom.rv2ide' \
     src/network/resolvconf.c \
     src/network/lookup_name.c
 
-# Build musl for ARM64
+# Build musl with shared library enabled
 RUN ./configure \
     --prefix=/out \
     --syslibdir=/out/lib \
-    --disable-shared \
+    --target=aarch64-linux-musl \
+    --enable-shared \
     && make -j2 \
     && make install
 
-
-# Locate and prepare musl loader
+# Verify libc.so and create loader file
 RUN set -eux; \
-    echo "===== SEARCH LOADER IN /out ====="; \
-    find /out -name 'ld-musl*' -print; \
-    echo "===== SEARCH LOADER IN BUILD ====="; \
-    find /build -name 'ld-musl*' -print; \
-    LOADER="$(find /out -name 'ld-musl-aarch64.so.1' -print -quit)"; \
-    if [ -z "$LOADER" ]; then \
-        echo "ERROR: musl loader not found in /out"; \
-        echo "===== INSTALLED FILES ====="; \
-        find /out -maxdepth 4 -type f -print; \
-        exit 1; \
-    fi; \
+    echo "===== INSTALLED LIBRARIES ====="; \
+    find /out/lib -maxdepth 1 -type f -o -type l; \
+    test -f /out/lib/libc.so; \
+    file /out/lib/libc.so; \
     mkdir -p /result; \
-    cp -L "$LOADER" /result/ld-musl-aarch64-termux.so; \
+    cp -L /out/lib/libc.so \
+       /result/ld-musl-aarch64-termux.so; \
     chmod 755 /result/ld-musl-aarch64-termux.so; \
-    file /result/ld-musl-aarch64-termux.so
-
+    echo "===== VERIFY ACS DNS PATHS ====="; \
+    grep -aFq '/data/data/com.tom.rv2ide/files/usr/etc/resolv.conf' \
+       /result/ld-musl-aarch64-termux.so; \
+    grep -aFq '/data/data/com.tom.rv2ide/files/usr/etc/hosts' \
+       /result/ld-musl-aarch64-termux.so; \
+    file /result/ld-musl-aarch64-termux.so; \
+    echo "ACS LOADER BUILD VERIFIED"
 
 # Export artifact
 FROM scratch
