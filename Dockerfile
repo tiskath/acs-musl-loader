@@ -58,6 +58,7 @@ RUN grep -n 'com.tom.rv2ide' \
 # Build musl for ARM64
 RUN ./configure \
     --prefix=/out \
+    --syslibdir=/out/lib \
     --disable-shared \
     && make -j2 \
     && make install
