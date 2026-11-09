@@ -8,8 +8,8 @@ RUN apk add --no-cache \
 
 WORKDIR /build
 
-RUN git clone https://git.musl-libc.org/git/musl.git . \
-    && git checkout v1.2.5
+RUN git clone --depth 1 --branch v1.2.5 \
+    https://github.com/ifduyue/musl.git .
 
 # เปลี่ยน DNS และ hosts path ให้ตรงกับ ACS
 RUN sed -i \
